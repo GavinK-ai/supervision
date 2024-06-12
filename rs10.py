@@ -17,6 +17,7 @@ import math
 from datetime import datetime
 import shutil
 from opcua import Client
+import gc
 
 
 def set_logging():
@@ -120,7 +121,7 @@ CLASS_COLOR = {
     'Person':(128,0,128),
 }
 SHOW_DEBUG = True
-
+IFMS = False #laptop dir or IFMS pc dir
 
 ##################################################################################################################################################################
 ##################################################################################################################################################################
@@ -262,6 +263,17 @@ class DefaultDequeOrderedDict(OrderedDict):
     def __missing__(self, key):
         self[key] = deque(maxlen=self.max_length)
         return self[key]
+    
+def activate_tag_2(source_split,offence):
+    tag_object = f"Cam{source_split}"
+    if offence==0:
+        tag_object += " Speeding"
+    else:
+        tag_object += " Overtime Parking"
+    # tag_object = " ".join(tag_object.split()[0:3])
+    # print(f" Tag Object: {tag_object}")
+    # LOGGER.debug(f'{tag_object} Tag Activated')
+    return tag_object
 
 ##################################################################################################################################################################
 ##################################################################################################################################################################
@@ -490,7 +502,14 @@ if __name__ == "__main__":
                 if count > int(video_info.fps*2):
                     LOGGER.info(f'Speeding Detected ID {key} {class_name} Speed {max:.2f}{unit}')
                     pop_item = speed_dict.pop(key=key)
-                    record_video_flag = True
+                    record_video_flag = True #Recording Flag (Set to True by default)
+                    last_alert_vehicle = class_name
+                    tag_object = activate_tag_2(args.cam,0)
+                    tag_activate_speeding = root.get_child(["0:Objects", "2:Cameras", "2:"+tag_object+""])
+                    tag_activate_speeding.set_value('1')
+
+                    DMY_alert=f"{datetime.now().day}-{datetime.now().month}-{datetime.now().year}"
+                    hmsec_alert=f"{datetime.now().hour}:{datetime.now().minute}:{datetime.now().second}" 
                     break
                 # #append vehicle to df
                 # #Issue save df without video source as video not saved yet if speeding detected
@@ -549,6 +568,25 @@ if __name__ == "__main__":
             # save_path = f"clip_{datetime.now().strftime('%Y-%d-%m--%H-%M-%S')}_cam_{args.cam}.mp4"
             save_path = f"clip_1.mp4"
             kcw.start(save_path,cv2.VideoWriter_fourcc(*'mp4v'), video_info.fps)
+
+            Y = datetime.now().year
+            M = datetime.now().month
+            D = datetime.now().day
+            h = datetime.now().hour
+            m = datetime.now().minute
+            sec = datetime.now().second
+
+            DMY=f"{D}-{M}-{Y}"
+            hmsec=f"{h}:{m}:{sec}" 
+
+            #Copy clip to shared folder
+            timestamp = str(D).zfill(2)+str(M).zfill(2)+str(Y)+'_'+str(h).zfill(2)+str(m).zfill(2)+str(sec).zfill(2)
+            # timestamp = timestamp.replace(":","_")  
+            vid_src = f"clip_{str(args.cam)}.mp4" #Video Source
+            #replace detect[5] with last_alert_vehicle
+            vid_filename = f"{timestamp}_{tag_object}_{last_alert_vehicle}.mp4" #Video Destination with timestamp and info
+            tag_offense = tag_object.split(" ")[1]
+            tag_cam = tag_object.split(" ")[0]
        
         consecFrames += 1
  
@@ -560,10 +598,34 @@ if __name__ == "__main__":
             LOGGER.info('Recording Finised')
             # print(f"Recording Finished")
             # vid_dst = rf"\\shimanoace.local\\spl-common\\PE\\SSIP Smart Vision\\Supervision Speeding"
-            # vid_dst = rf"\\shimanoace.local\\spl-common\\PE\\SSIP Smart Vision\\Supervision Speeding\\{str(tag_offense)}\\{str(vid_filename)}"
+            vid_dst = rf"\\shimanoace.local\\spl-common\\PE\\SSIP Smart Vision\\Supervision Speeding\\{str(tag_offense)}\\{str(vid_filename)}"
             # shutil.copy(save_path,vid_dst)
             LOGGER.info(f'Video Copied')
             # print(f"Video Copied")
+
+        # Alert DF (Trigger and Non Trigger)
+        alert = pd.DataFrame([[DMY_alert,hmsec_alert,last_alert_vehicle,max,args.cam]],
+                            columns=["Date","Time","Class","Speed","Camera Location"])
+        df = df.append(alert,ignore_index=True)
+
+        time_now = datetime.now()
+        MINUTE_ = 0
+        SECOND_ = 0
+        Y = datetime.now().year
+        M = datetime.now().month
+        D = datetime.now().day
+        if time_now.minute%10 == MINUTE_ and time_now.second%10 == SECOND_:
+            try:
+                # df.to_csv(f"Alerts_{D}_{M}_{Y}_Cam{stream_id}.csv",index=None) #Save to local drive
+                if IFMS:
+                    df.to_csv(rf"\\shimanoace.local\\spl-common\\PE\\SSIP Smart Vision\\Alert Data\\Alerts_{D}_{M}_{Y}_Cam{args.cam}.csv",index=None) #Save a copy to share drive
+                    df.to_csv(f"Alerts_{D}_{M}_{Y}_Cam{args.cam}.csv",index=None) #Save to local drive
+                else:
+                    df.to_csv(rf"X:\\PE\\SSIP Smart Vision\\Alert Data\\Alerts_{D}_{M}_{Y}_Cam{args.cam}.csv",index=None) #Save a copy to share drive
+                    df.to_csv(f"Alerts_{D}_{M}_{Y}_Cam{args.cam}.csv",index=None) #Save to local drive
+                LOGGER.debug(f'Save Dataframe Successful')
+            except Exception as e:
+                LOGGER.exception(f"Write DataFrame to file Error \n{e}")
 
         if cv2.waitKey(1) & 0xFF == ord('x') or cv2.waitKey(1) & 0xFF == ord('q'):
             cv2.destroyWindow(title)
@@ -572,6 +634,8 @@ if __name__ == "__main__":
 
     cap.release()
     cv2.destroyAllWindows()
+    client.disconnect()
+    gc.collect()
     print('Exiting...') #Terminal not able to terminate properly
 
     exit()
@@ -588,7 +652,7 @@ python rs9.py --cam 58
 Fix Frame Drop: (Solved)
 -ultralytic>engine>model -- add try catch for missing source #deprecated (solved)
 
-Terminal Stuck on exit
+Terminal Stuck on exit: Solved (Client disconnect)
 
 Perspective Transfrom: Done
 
