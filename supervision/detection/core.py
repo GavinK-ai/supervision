@@ -152,6 +152,7 @@ class Detections:
         """
         Iterates over the Detections object and yield a tuple of
         `(xyxy, mask, confidence, class_id, tracker_id, data)` for each detection.
+        Reset To 0 when above 100
         """
         for i in range(len(self.xyxy)):
             yield (

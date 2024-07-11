@@ -122,7 +122,7 @@ CLASS_COLOR = {
 }
 SHOW_DEBUG = True
 IFMS = False #laptop dir or IFMS pc dir
-
+speed_limit = 3
 ##################################################################################################################################################################
 ##################################################################################################################################################################
 ##################################################################################################################################################################
@@ -290,7 +290,7 @@ if __name__ == "__main__":
         unit = 'kmh'
     elif np.isin(args.cam,L2):
         floor = 'L2'
-        unit = 'ms'
+        unit = 'm/s'
     elif np.isin(args.cam,B1):
         floor = 'B1'
         unit = 'kmh'
@@ -367,9 +367,6 @@ if __name__ == "__main__":
 
     coordinates = defaultdict(lambda: deque(maxlen=video_info.fps))
     speed_dict = DefaultDequeOrderedDict(max_length=video_info.fps*4)
-    speeding_dict = DefaultDequeOrderedDict(max_length=video_info.fps*4)
-    # tracking_dict = DefaultDequeOrderedDict(max_length=video_info.fps*4)
-    tracking_dict = []
 
     cam = args.cam
     rtsp = RTSP.get(str(args.cam))
@@ -439,9 +436,14 @@ if __name__ == "__main__":
             if MAP: 
                 annotated_frame = draw_map_rect(annotated_frame,source,target)
 
+            # Refresh ID list after each frame 
+            tracker_id_list = [] #create a list for currently detected id on frame
+            # tracker_id_list = DefaultDequeOrderedDict(max_length=5) #create a list for currently detected id on frame
+
             for detect in detections: #for each detected object in one frame
                 _, _, confidence, class_id, tracker_id, _ = detect
-                # print(detect)
+                tracker_id_list.append(tracker_id)
+                # tracker_id_list.append([tracker_id,class_id,time_sync()])
                 if len(coordinates[tracker_id]) < video_info.fps / 2: #if object is tracked for less than 1/2 of fps, label object with ID
                     labels.append(f"#{tracker_id}")
                 else: 
@@ -459,114 +461,6 @@ if __name__ == "__main__":
                     labels.append(f"#{tracker_id} {class_name} {speed:.2f}{unit} {conf}% {coordinate_start} {coordinate_end}")
                     annotated_frame = draw_map_point(annotated_frame,coordinates[tracker_id][0],source,target,tracker_id,class_name)
             
-            # Annotate Image
-            annotated_frame = trace_annotator.annotate(
-                scene=annotated_frame, detections=detections
-            )
-            annotated_frame = bounding_box_annotator.annotate(
-                scene=annotated_frame, detections=detections
-            )
-            annotated_frame = label_annotator.annotate(
-                scene=annotated_frame, detections=detections, labels=labels
-            )
-            annotated_frame = zone_annotator.annotate(
-                scene=annotated_frame
-            )
-            
-            # Get delta time for real time fps calculation
-            t1 = time_sync()
-            dt = t1-t0
-            fps = int(1/dt)
-
-        else: #Retry Video Capture if frame drop or corrupted
-            # fps = 0
-            cap.release()
-            cap = cv2.VideoCapture(rtsp)
-            success, frame = cap.read()
-            LOGGER.info(f'Retry Frame {success}')    
-
-        # Draw FPS on Frame
-        cv2.putText(annotated_frame,str(fps)+' FPS',(annotated_frame.shape[1]-150,40),fontFace=cv2.FONT_HERSHEY_SIMPLEX,thickness = 2,fontScale = 1,color=(255,255,255))
-
-        speed_limit = 1.2
-        if SHOW_DEBUG:
-            cv2.putText(annotated_frame,'DEBUG: Speed Dict',(150,annotated_frame.shape[0]-530),fontFace=cv2.FONT_HERSHEY_SIMPLEX,thickness = 2,fontScale = 1,color=(255,255,255))
-        
-        # for index, (key, value) in enumerate(speed_dict.items()):
-        #     # print(f"Index: {index}, Key: {key}, Value: {value}")
-        #     value_arr = np.array(value)
-        #     mean = np.mean(value_arr)
-        #     max = np.max(value_arr)
-        #     min = np.min(value_arr)
-        #     std = np.std(value_arr)
-        #     count = 0
-        #     if max > speed_limit: #if max speed of vehicle crosses speed limit
-        #         # speeding_dict[key].append([max, class_name])
-        #         # speeding_dict[key].append([max])
-        #         count = sum(1 for num in value if num > speed_limit) #count the sum of number of frames vehicle exceeding max speed
-        #         if count > int(video_info.fps*2):
-        #             LOGGER.info(f'Speeding Detected ID {key} {class_name} Speed {max:.2f}{unit}')
-        #             pop_item = speed_dict.pop(key=key)
-        #             record_video_flag = True #Recording Flag (Set to True by default)
-        #             last_alert_vehicle = class_name
-        #             tag_object = activate_tag_2(args.cam,0)
-        #             tag_activate_speeding = root.get_child(["0:Objects", "2:Cameras", "2:"+tag_object+""])
-        #             tag_activate_speeding.set_value('1')
-
-        #             DMY_alert=f"{datetime.now().day}-{datetime.now().month}-{datetime.now().year}"
-        #             hmsec_alert=f"{datetime.now().hour}:{datetime.now().minute}:{datetime.now().second}" 
-
-        #             LOGGER.debug(f'Pop item:{pop_item}')
-        #             break
-        #             # #append vehicle to df
-        #             # #Issue save df without video source as video not saved yet if speeding detected
-        #             # alert = pd.DataFrame([[DMY,hmsec,tag_offense,last_alert_vehicle,'NA',speed_value,tag_cam,vid_dst]],
-        #             #         columns=["Date","Time","Offence","Class","Number Plate","Speed","Camera Location","Link"])
-        #             # df = df.append(alert,ignore_index=True)
-        #     if SHOW_DEBUG:
-        #         str_speed = f'ID:{key} Mean:{mean:.2f} Max:{max:.2f} Min:{min:.2f} Std:{std:.2f} Frame Count {count}'
-        #         cv2.putText(annotated_frame,str_speed,(150,annotated_frame.shape[0]-500+index*30),fontFace=cv2.FONT_HERSHEY_SIMPLEX,thickness = 2,fontScale = 1,color=(255,255,255))
-
-        # try:
-        #     # if SHOW_DEBUG:
-        #     #     cv2.putText(annotated_frame,'Speeding Dict',(150,annotated_frame.shape[0]-830),fontFace=cv2.FONT_HERSHEY_SIMPLEX,thickness = 1,fontScale = 1,color=(255,255,255))
-        #     for index, (key, value) in enumerate(speeding_dict.items()):
-        #         # speeding_str = f'ID:{key} {value[0][1]} Speed:{value[0][0]:.2f}{unit}'
-        #         speeding_str = f'ID:{key} {value}'
-        #         cv2.putText(annotated_frame,str(speeding_str),(150,annotated_frame.shape[0]-800+index*30),fontFace=cv2.FONT_HERSHEY_SIMPLEX,thickness = 1,fontScale = 1,color=(255,255,255))
-
-        #     # for i in range(len(tracking_dict)):
-        #     #     cv2.putText(annotated_frame,str(tracking_dict),(150,annotated_frame.shape[0]-200+30),fontFace=cv2.FONT_HERSHEY_SIMPLEX,thickness = 1,fontScale = 1,color=(255,255,255))
-
-        #     # tracker_id_list = []
-        #     # for detect in detections:
-        #     #     _, _, confidence, class_id, tracker_id, _ = detect
-        #     #     tracker_id_list.append(tracker_id) #create a list for current detected id on frame
-        #     # cv2.putText(annotated_frame,str(tracker_id_list),(150,annotated_frame.shape[0]-200+30),fontFace=cv2.FONT_HERSHEY_SIMPLEX,thickness = 1,fontScale = 1,color=(255,255,255))
-        #     # for key in speed_dict:
-        #     #     # print(f"Item: {item} Speed_dict: {speed_dict.keys()}")
-        #     #     if key not in tracker_id_list:
-        #     #         print(f'ID dismissed: {key}')
-        #     #         pop_item = speed_dict.pop(key=key)
-        #     #         # LOGGER.info(f'Pop item:{pop_item}')
-        #     #         # print(f"Pop Item: {pop_item}")
-                
-        # except Exception as e:
-        #     LOGGER.exception(e)
-
-        try:
-            tracker_id_list = []
-            for detect in detections:
-                _, _, confidence, class_id, tracker_id, _ = detect
-                tracker_id_list.append(tracker_id,class_id) #create a list for current detected id on frame
-            cv2.putText(annotated_frame,str(tracker_id_list),(150,annotated_frame.shape[0]-200+30),fontFace=cv2.FONT_HERSHEY_SIMPLEX,thickness = 1,fontScale = 1,color=(255,255,255))
-            # for key in speed_dict:
-            #     # print(f"Item: {item} Speed_dict: {speed_dict.keys()}")
-            #     if key not in tracker_id_list:
-            #         print(f'ID dismissed: {key}')
-            #         pop_item = speed_dict.pop(key=key)
-            #         # LOGGER.info(f'Pop item:{pop_item}')
-            #         print(f"Pop Item: {pop_item}")
             for index, (key, value) in enumerate(speed_dict.items()):
             # print(f"Index: {index}, Key: {key}, Value: {value}")
                 value_arr = np.array(value)
@@ -602,25 +496,72 @@ if __name__ == "__main__":
                     pop_item = speed_dict.pop(key=key)
                     # LOGGER.info(f'Pop item:{pop_item}')
                     # print(f"Pop Item: {pop_item}")
-                    LOGGER.info(f'Pop item Dismissed:{key} Max: {max:.2f}')
+                    LOGGER.info(f'Pop item Dismissed:ID {key} Max: {max:.2f}{unit}')
                     # print(f'Pop item dismissed ID {key}')
                     break
+                    # start_time = time_sync()
+                    # while True:
+                    #     current_time = time_sync()
+                    #     elapsed_time = current_time-start_time
+                    #     if elapsed_time>3:
+                    #         pop_item = speed_dict.pop(key=key)
+                    #         LOGGER.info(f'Pop item Dismissed:{key} Max: {max:.2f}')
+                    #         break
+
+                # for sublist in tracker_id_list:
+                #     cv2.putText(annotated_frame,'[DEBUG] Tracker ID List '+str(tracker_id_list),(150,annotated_frame.shape[0]-200),fontFace=cv2.FONT_HERSHEY_SIMPLEX,thickness = 2,fontScale = 1,color=(255,255,255))
+                #     if key not in sublist:
+                #         pop_item = speed_dict.pop(key=key)
+                #         # LOGGER.info(f'Pop item:{pop_item}')
+                #         # print(f"Pop Item: {pop_item}")
+                #         LOGGER.info(f'Pop item Dismissed:{key} Max: {max:.2f} {sublist}')
+                #         # print(f'Pop item dismissed ID {key}')
+                #         break
+
                 if SHOW_DEBUG:
-                    str_speed = f'ID:{key} Mean:{mean:.2f} Max:{max:.2f} Min:{min:.2f} Std:{std:.2f} Speeding Frame Count {count}'
-                    if count > int(video_info.fps*2):
-                        cv2.putText(annotated_frame,str_speed,(150,annotated_frame.shape[0]-500+index*30),fontFace=cv2.FONT_HERSHEY_SIMPLEX,thickness = 2,fontScale = 1,color=(0,0,255)) #Speeding Red Text
-                    else:
-                        cv2.putText(annotated_frame,str_speed,(150,annotated_frame.shape[0]-500+index*30),fontFace=cv2.FONT_HERSHEY_SIMPLEX,thickness = 2,fontScale = 1,color=(255,255,255)) #Default white text
-        except Exception as e:
-            LOGGER.exception(f'Pop Speed Dict Error {e}')
+                    str_speed = f'ID:{key} Mean:{mean:.2f} Max:{max:.2f} Min:{min:.2f} Std:{std:.2f} Frame Count {count}'
+                    cv2.putText(annotated_frame,str_speed,(150,annotated_frame.shape[0]-500+index*30),fontFace=cv2.FONT_HERSHEY_SIMPLEX,thickness = 2,fontScale = 1,color=(255,255,255))
+            
+            # Annotate Image
+            annotated_frame = trace_annotator.annotate(
+                scene=annotated_frame, detections=detections
+            )
+            annotated_frame = bounding_box_annotator.annotate(
+                scene=annotated_frame, detections=detections
+            )
+            annotated_frame = label_annotator.annotate(
+                scene=annotated_frame, detections=detections, labels=labels
+            )
+            annotated_frame = zone_annotator.annotate(
+                scene=annotated_frame
+            )
+            
+            # Get delta time for real time fps calculation
+            t1 = time_sync()
+            dt = t1-t0
+            fps = int(1/dt)
+
+        else: #Retry Video Capture if frame drop or corrupted
+            # fps = 0
+            cap.release()
+            cap = cv2.VideoCapture(rtsp)
+            success, frame = cap.read()
+            LOGGER.info(f'Retry Frame {success}')    
+
+        # Draw FPS on Frame
+        cv2.putText(annotated_frame,str(fps)+' FPS',(annotated_frame.shape[1]-150,40),fontFace=cv2.FONT_HERSHEY_SIMPLEX,thickness = 2,fontScale = 1,color=(255,255,255))
+
+        
+
+        if SHOW_DEBUG:
+            cv2.putText(annotated_frame,'[DEBUG] Speed Dict',(150,annotated_frame.shape[0]-530),fontFace=cv2.FONT_HERSHEY_SIMPLEX,thickness = 2,fontScale = 1,color=(255,255,255))
+            cv2.putText(annotated_frame,'[DEBUG] ID List '+str(tracker_id_list),(150,annotated_frame.shape[0]-200+30),fontFace=cv2.FONT_HERSHEY_SIMPLEX,thickness = 2,fontScale = 1,color=(255,255,255))
+
         
         # Pop item (FIFO) if len of speed_dict is more than 15
         if len(speed_dict)>5:
             speed_dict.popitem(last = False)
             LOGGER.debug('Pop Speed Dict >5')
-
-        if len(speeding_dict)>5:
-            speeding_dict.popitem(last = False)
 
         # Draw Mouse Marker on Map
         try:
@@ -744,7 +685,7 @@ if __name__ == "__main__":
 ##################################################################################################################################################################
 '''
 <To Run>
-python rs10.py --cam 167
+python rs11.py --cam 167
 
 <Todo>
 Fix Frame Drop: (Solved)
